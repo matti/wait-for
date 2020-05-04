@@ -9,11 +9,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type servicesType []string
 
-var timeout int
+var timeout time.Duration
 var services servicesType
 
 func (s *servicesType) String() string {
@@ -74,27 +76,37 @@ func waitForServices(services []string, timeOut time.Duration) (waitersType, err
 }
 
 func init() {
-	flag.IntVar(&timeout, "t", 20, "timeout")
+	flag.DurationVar(&timeout, "t", time.Duration(3*time.Second), "timeout")
 }
 
 func main() {
+	log.SetReportCaller(true)
+
+	if levelString := os.Getenv("DEBUG"); levelString != "" {
+		level, err := log.ParseLevel(levelString)
+		if err != nil {
+			panic(err)
+		}
+		log.SetLevel(level)
+	}
+
 	flag.Parse()
 	services = flag.Args()
-	fmt.Println(services)
+	log.Debug("services", services)
 	if len(services) == 0 {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if waiters, err := waitForServices(services, time.Duration(timeout)*time.Second); err != nil {
+	if waiters, err := waitForServices(services, timeout); err != nil {
 		fmt.Println(err)
 
 		for s, waiter := range waiters {
 			select {
 			case <-waiter:
-				fmt.Println(s, "did open")
+				log.Info(s, " did open")
 			default:
-				fmt.Println(s, "did not open")
+				log.Info(s, " did not open")
 			}
 		}
 
