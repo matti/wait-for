@@ -25,12 +25,14 @@ func (s *servicesType) Set(value string) error {
 	return nil
 }
 
+type waitersType map[string]chan bool
+
 // waitForServices tests and waits on the availability of a TCP host and port
-func waitForServices(services []string, timeOut time.Duration) (map[string]chan bool, error) {
+func waitForServices(services []string, timeOut time.Duration) (waitersType, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	waiters := make(map[string]chan bool)
+	waiters := make(waitersType)
 
 	var wg sync.WaitGroup
 	wg.Add(len(services))
@@ -73,11 +75,12 @@ func waitForServices(services []string, timeOut time.Duration) (map[string]chan 
 
 func init() {
 	flag.IntVar(&timeout, "t", 20, "timeout")
-	flag.Var(&services, "it", "<host:port> [host2:port,...] comma seperated list of services")
 }
 
 func main() {
 	flag.Parse()
+	services = flag.Args()
+	fmt.Println(services)
 	if len(services) == 0 {
 		flag.Usage()
 		os.Exit(1)
