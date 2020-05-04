@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
@@ -26,30 +27,41 @@ func (s *servicesType) Set(value string) error {
 
 // waitForServices tests and waits on the availability of a TCP host and port
 func waitForServices(services []string, timeOut time.Duration) error {
-	var depChan = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var wg sync.WaitGroup
 	wg.Add(len(services))
-	go func() {
-		for _, s := range services {
-			go func(s string) {
-				defer wg.Done()
-				for {
+	for _, s := range services {
+		go func(s string) {
+			defer wg.Done()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
 					_, err := net.Dial("tcp", s)
 					if err == nil {
 						return
 					}
 					time.Sleep(1 * time.Second)
 				}
-			}(s)
-		}
+			}
+		}(s)
+	}
+
+	go func() {
 		wg.Wait()
-		close(depChan)
+		cancel()
 	}()
 
 	select {
-	case <-depChan: // services are ready
+	case <-ctx.Done():
 		return nil
 	case <-time.After(timeOut):
+		cancel()
+		<-ctx.Done()
 		return fmt.Errorf("services aren't ready in %s", timeOut)
 	}
 }
