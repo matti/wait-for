@@ -26,14 +26,18 @@ func (s *servicesType) Set(value string) error {
 }
 
 // waitForServices tests and waits on the availability of a TCP host and port
-func waitForServices(services []string, timeOut time.Duration) error {
+func waitForServices(services []string, timeOut time.Duration) (map[string]chan bool, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	waiters := make(map[string]chan bool)
 
 	var wg sync.WaitGroup
 	wg.Add(len(services))
 	for _, s := range services {
-		go func(s string) {
+		waiters[s] = make(chan bool)
+
+		go func(waiter chan bool, s string) {
 			defer wg.Done()
 
 			for {
@@ -43,12 +47,13 @@ func waitForServices(services []string, timeOut time.Duration) error {
 				default:
 					_, err := net.Dial("tcp", s)
 					if err == nil {
+						close(waiter)
 						return
 					}
 					time.Sleep(1 * time.Second)
 				}
 			}
-		}(s)
+		}(waiters[s], s)
 	}
 
 	go func() {
@@ -58,11 +63,11 @@ func waitForServices(services []string, timeOut time.Duration) error {
 
 	select {
 	case <-ctx.Done():
-		return nil
+		return waiters, nil
 	case <-time.After(timeOut):
 		cancel()
 		<-ctx.Done()
-		return fmt.Errorf("services aren't ready in %s", timeOut)
+		return waiters, fmt.Errorf("services aren't ready in %s", timeOut)
 	}
 }
 
@@ -78,8 +83,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := waitForServices(services, time.Duration(timeout)*time.Second); err != nil {
+	if waiters, err := waitForServices(services, time.Duration(timeout)*time.Second); err != nil {
 		fmt.Println(err)
+
+		for s, waiter := range waiters {
+			select {
+			case <-waiter:
+				fmt.Println(s, "did open")
+			default:
+				fmt.Println(s, "did not open")
+			}
+		}
+
 		os.Exit(1)
 	}
 	fmt.Println("services are ready!")
