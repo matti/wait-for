@@ -95,7 +95,6 @@ func main() {
 	}
 	go waitForServices(ctx, cancel, waiters)
 	<-ctx.Done()
-	fmt.Println("services are ready!")
 
 	switch ctx.Err() {
 	case context.Canceled:
