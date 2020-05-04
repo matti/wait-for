@@ -27,21 +27,17 @@ func (s *servicesType) Set(value string) error {
 	return nil
 }
 
-type waitersType map[string]chan bool
+type waiterType chan struct{}
+type waiterMap map[string]waiterType
+
+type serviceResults map[string]bool
 
 // waitForServices tests and waits on the availability of a TCP host and port
-func waitForServices(services []string, timeOut time.Duration) (waitersType, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	waiters := make(waitersType)
-
+func waitForServices(ctx context.Context, cancel context.CancelFunc, waiters waiterMap) {
 	var wg sync.WaitGroup
-	wg.Add(len(services))
-	for _, s := range services {
-		waiters[s] = make(chan bool)
-
-		go func(waiter chan bool, s string) {
+	wg.Add(len(waiters))
+	for service, waiter := range waiters {
+		go func(service string, waiter waiterType) {
 			defer wg.Done()
 
 			for {
@@ -49,7 +45,7 @@ func waitForServices(services []string, timeOut time.Duration) (waitersType, err
 				case <-ctx.Done():
 					return
 				default:
-					_, err := net.Dial("tcp", s)
+					_, err := net.Dial("tcp", service)
 					if err == nil {
 						close(waiter)
 						return
@@ -57,7 +53,7 @@ func waitForServices(services []string, timeOut time.Duration) (waitersType, err
 					time.Sleep(1 * time.Second)
 				}
 			}
-		}(waiters[s], s)
+		}(service, waiter)
 	}
 
 	go func() {
@@ -65,14 +61,7 @@ func waitForServices(services []string, timeOut time.Duration) (waitersType, err
 		cancel()
 	}()
 
-	select {
-	case <-ctx.Done():
-		return waiters, nil
-	case <-time.After(timeOut):
-		cancel()
-		<-ctx.Done()
-		return waiters, fmt.Errorf("services aren't ready in %s", timeOut)
-	}
+	<-ctx.Done()
 }
 
 func init() {
@@ -80,6 +69,9 @@ func init() {
 }
 
 func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
 	log.SetReportCaller(true)
 
 	if levelString := os.Getenv("DEBUG"); levelString != "" {
@@ -97,21 +89,29 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	waiters := make(waiterMap)
+	for _, s := range services {
+		waiters[s] = make(waiterType)
+	}
+	go waitForServices(ctx, cancel, waiters)
+	<-ctx.Done()
+	fmt.Println("services are ready!")
 
-	if waiters, err := waitForServices(services, timeout); err != nil {
-		fmt.Println(err)
-
-		for s, waiter := range waiters {
+	switch ctx.Err() {
+	case context.Canceled:
+		os.Exit(0)
+	case context.DeadlineExceeded:
+		for service, waiter := range waiters {
 			select {
 			case <-waiter:
-				log.Info(s, " did open")
+				log.Info(service, " did open")
 			default:
-				log.Info(s, " did not open")
+				log.Info(service, " did not open")
 			}
 		}
 
 		os.Exit(1)
+	default:
+		panic("not handled")
 	}
-	fmt.Println("services are ready!")
-	os.Exit(0)
 }
