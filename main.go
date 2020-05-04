@@ -30,8 +30,6 @@ func (s *servicesType) Set(value string) error {
 type waiterType chan struct{}
 type waiterMap map[string]waiterType
 
-type serviceResults map[string]bool
-
 // waitForServices tests and waits on the availability of a TCP host and port
 func waitForServices(ctx context.Context, cancel context.CancelFunc, waiters waiterMap) {
 	var wg sync.WaitGroup
